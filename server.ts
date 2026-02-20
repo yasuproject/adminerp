@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 
 dotenv.config();
 
@@ -27,52 +28,47 @@ async function startServer() {
       const connection = await pool.getConnection();
       console.log("Initializing database tables...");
       
-      // Create table with all required fields
+      // Create admins table (for website login only)
       await connection.query(`
         CREATE TABLE IF NOT EXISTS admins (
           id INT AUTO_INCREMENT PRIMARY KEY,
-          full_name VARCHAR(100),
-          username VARCHAR(50) UNIQUE,
-          phone_number VARCHAR(20),
-          email VARCHAR(100),
+          username VARCHAR(50) UNIQUE NOT NULL,
+          email VARCHAR(100) UNIQUE NOT NULL,
           password VARCHAR(255) NOT NULL,
-          role ENUM('cashier', 'admin', 'manager', 'sales', 'inventory') DEFAULT 'cashier',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_login DATETIME NULL
         )
       `);
 
-      // Ensure columns exist (in case table was created previously with fewer columns)
-      const [columns]: any = await connection.query("SHOW COLUMNS FROM admins");
-      const columnNames = columns.map((c: any) => c.Field);
+      // Create users table (for mobile Flutter API)
+      await connection.query(`DROP TABLE IF EXISTS users`);
+      await connection.query(`
+        CREATE TABLE users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          username VARCHAR(100) NOT NULL,
+          email VARCHAR(255) NULL,
+          password VARCHAR(255) NOT NULL,
+          full_name VARCHAR(255) NOT NULL,
+          role VARCHAR(50) DEFAULT 'cashier',
+          phone_number VARCHAR(50) NOT NULL,
+          is_active TINYINT(1) DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_login DATETIME NULL
+        )
+      `);
       
-      if (!columnNames.includes('full_name')) {
-        await connection.query("ALTER TABLE admins ADD COLUMN full_name VARCHAR(100) AFTER id");
-      } else {
-        // Update existing column to be nullable
-        await connection.query("ALTER TABLE admins MODIFY COLUMN full_name VARCHAR(100) NULL");
-      }
-
-      if (!columnNames.includes('username')) {
-        await connection.query("ALTER TABLE admins ADD COLUMN username VARCHAR(50) UNIQUE AFTER full_name");
-      } else {
-        // Update existing column to be nullable
-        await connection.query("ALTER TABLE admins MODIFY COLUMN username VARCHAR(50) NULL");
-      }
-      if (!columnNames.includes('role')) {
-        await connection.query("ALTER TABLE admins ADD COLUMN role ENUM('cashier', 'admin', 'manager', 'sales', 'inventory') DEFAULT 'cashier' AFTER password");
-      }
-      
-      // Seed default admin if none exists
-      const [rows]: any = await connection.query("SELECT COUNT(*) as count FROM admins");
-      if (rows[0].count === 0) {
+      // Seed default admin if none exists (for website)
+      const [adminRows]: any = await connection.query("SELECT COUNT(*) as count FROM admins");
+      if (adminRows[0].count === 0) {
         console.log("Seeding default admin user...");
+        const hashedPassword = await bcrypt.hash('sebri2026', 10);
         await connection.query(
-          "INSERT INTO admins (full_name, username, email, password, role) VALUES (?, ?, ?, ?, ?)",
-          ['System Administrator', 'admin', 'admin@sebri.com', 'admin_password_2026', 'admin']
+          "INSERT INTO admins (username, email, password) VALUES (?, ?, ?)",
+          ['sebri_admin', 'admin@sebri.com', hashedPassword]
         );
       }
 
-      console.log("Admins table verified and seeded.");
+      console.log("Database tables verified and seeded.");
       connection.release();
     } catch (error) {
       console.error("Failed to initialize database:", error);
@@ -86,7 +82,7 @@ async function startServer() {
 
   app.get("/api/users", async (req, res) => {
     try {
-      const [rows] = await pool.query("SELECT id, full_name, username, phone_number, email, role, created_at FROM admins ORDER BY created_at DESC");
+      const [rows] = await pool.query("SELECT id, username, email, full_name, role, phone_number, is_active, created_at, last_login FROM users ORDER BY created_at DESC");
       res.json(rows);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -94,11 +90,12 @@ async function startServer() {
   });
 
   app.post("/api/users", async (req, res) => {
-    const { full_name, username, phone_number, email, password, role } = req.body;
+    const { username, email, password, full_name, role, phone_number } = req.body;
     try {
+      const hashedPassword = await bcrypt.hash(password, 10);
       await pool.query(
-        "INSERT INTO admins (full_name, username, phone_number, email, password, role) VALUES (?, ?, ?, ?, ?, ?)",
-        [full_name, username, phone_number, email, password, role || 'cashier']
+        "INSERT INTO users (username, email, password, full_name, role, phone_number) VALUES (?, ?, ?, ?, ?, ?)",
+        [username, email || null, hashedPassword, full_name, role || 'cashier', phone_number]
       );
       res.status(201).json({ message: "User created successfully" });
     } catch (error: any) {
@@ -106,14 +103,53 @@ async function startServer() {
     }
   });
 
+  app.post("/api/login", async (req, res) => {
+    const { identifier, password } = req.body;
+    try {
+      const [rows]: any = await pool.query(
+        "SELECT * FROM admins WHERE username = ? OR email = ?",
+        [identifier, identifier]
+      );
+      
+      if (rows.length === 0) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      const admin = rows[0];
+      const isValidPassword = await bcrypt.compare(password, admin.password);
+      
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      await pool.query("UPDATE admins SET last_login = NOW() WHERE id = ?", [admin.id]);
+      
+      res.json({ 
+        success: true, 
+        message: "Login successful",
+        user: { id: admin.id, username: admin.username, email: admin.email }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.put("/api/users/:id", async (req, res) => {
     const { id } = req.params;
-    const { full_name, username, phone_number, email, role } = req.body;
+    const { username, email, password, full_name, role, phone_number, is_active } = req.body;
     try {
-      await pool.query(
-        "UPDATE admins SET full_name = ?, username = ?, phone_number = ?, email = ?, role = ? WHERE id = ?",
-        [full_name, username, phone_number, email, role, id]
-      );
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await pool.query(
+          "UPDATE users SET username = ?, email = ?, password = ?, full_name = ?, role = ?, phone_number = ?, is_active = ? WHERE id = ?",
+          [username, email, hashedPassword, full_name, role, phone_number, is_active, id]
+        );
+      } else {
+        await pool.query(
+          "UPDATE users SET username = ?, email = ?, full_name = ?, role = ?, phone_number = ?, is_active = ? WHERE id = ?",
+          [username, email, full_name, role, phone_number, is_active, id]
+        );
+      }
       res.json({ message: "User updated successfully" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -123,8 +159,24 @@ async function startServer() {
   app.delete("/api/users/:id", async (req, res) => {
     const { id } = req.params;
     try {
-      await pool.query("DELETE FROM admins WHERE id = ?", [id]);
+      await pool.query("DELETE FROM users WHERE id = ?", [id]);
       res.json({ message: "User deleted successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Recreate admin endpoint
+  app.post("/api/admin/reset", async (req, res) => {
+    const { username, email, password } = req.body;
+    try {
+      await pool.query("DELETE FROM admins");
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await pool.query(
+        "INSERT INTO admins (username, email, password) VALUES (?, ?, ?)",
+        [username, email, hashedPassword]
+      );
+      res.json({ message: "Admin recreated successfully" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

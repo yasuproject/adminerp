@@ -14,15 +14,24 @@ import {
 // --- Types ---
 type View = 'login' | 'dashboard' | 'users';
 
+interface Toast {
+  id: number;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
 interface UserData {
   id?: number;
-  full_name: string;
   username: string;
-  phone_number?: string;
-  email?: string;
+  email: string;
   password?: string;
   confirmPassword?: string;
-  role: 'cashier' | 'admin' | 'manager' | 'sales' | 'inventory';
+  full_name: string;
+  role: 'admin' | 'manager' | 'cashier' | 'sales' | 'inventory';
+  phone_number?: string;
+  is_active?: number;
+  created_at?: string;
+  last_login?: string;
 }
 
 // --- Animation Variants ---
@@ -89,6 +98,35 @@ const StatCard = ({ title, value, trend, icon: Icon, color }: any) => (
   </motion.div>
 );
 
+const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast: (id: number) => void }) => (
+  <div className="fixed top-4 right-4 z-[100] flex flex-col gap-3">
+    <AnimatePresence>
+      {toasts.map((toast) => (
+        <motion.div
+          key={toast.id}
+          initial={{ opacity: 0, x: 100, scale: 0.8 }}
+          animate={{ opacity: 1, x: 0, scale: 1 }}
+          exit={{ opacity: 0, x: 100, scale: 0.8 }}
+          className={`px-5 py-4 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[280px] backdrop-blur-xl border ${
+            toast.type === 'success' ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' :
+            toast.type === 'error' ? 'bg-red-500/20 border-red-500/30 text-red-400' :
+            'bg-blue-500/20 border-blue-500/30 text-blue-400'
+          }`}
+        >
+          <div className={`w-2 h-2 rounded-full ${
+            toast.type === 'success' ? 'bg-emerald-400' :
+            toast.type === 'error' ? 'bg-red-400' : 'bg-blue-400'
+          }`} />
+          <span className="text-sm font-medium flex-1">{toast.message}</span>
+          <button onClick={() => removeToast(toast.id)} className="opacity-60 hover:opacity-100 transition-opacity">
+            <X size={16} />
+          </button>
+        </motion.div>
+      ))}
+    </AnimatePresence>
+  </div>
+);
+
 export default function App() {
   const [view, setView] = useState<View>('login');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -98,18 +136,30 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [activeTab, setActiveTab] = useState('Home');
   
+  // Toast State
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = (type: Toast['type'], message: string) => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => removeToast(id), 4000);
+  };
+  const removeToast = (id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
+  
   // Users State
   const [users, setUsers] = useState<UserData[]>([]);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [userForm, setUserForm] = useState<UserData>({
-    full_name: '',
     username: '',
-    phone_number: '',
     email: '',
     password: '',
     confirmPassword: '',
-    role: 'cashier'
+    full_name: '',
+    role: 'cashier',
+    phone_number: '',
+    is_active: 1
   });
 
   useEffect(() => {
@@ -132,13 +182,28 @@ export default function App() {
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier, password })
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        addToast('success', `Welcome back, ${data.user.username}!`);
+        setView('dashboard');
+      } else {
+        addToast('error', data.error || 'Login failed');
+      }
+    } catch (err) {
+      addToast('error', 'Connection error. Please try again.');
+    } finally {
       setIsLoading(false);
-      setView('dashboard');
-    }, 1000);
+    }
   };
 
   const handleLogout = () => {
@@ -148,19 +213,25 @@ export default function App() {
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingUser && userForm.password !== userForm.confirmPassword) {
-      alert("Passwords do not match!");
-      return;
-    }
 
     try {
       const method = editingUser ? 'PUT' : 'POST';
       const url = editingUser ? `/api/users/${editingUser.id}` : '/api/users';
       
+      const payload = {
+        username: userForm.username,
+        email: userForm.email,
+        full_name: userForm.full_name,
+        role: userForm.role,
+        phone_number: userForm.phone_number || null,
+        is_active: userForm.is_active,
+        ...(userForm.password ? { password: userForm.password } : {})
+      };
+      
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(userForm)
+        body: JSON.stringify(payload)
       });
 
       if (res.ok) {
@@ -168,20 +239,19 @@ export default function App() {
         setIsUserModalOpen(false);
         setEditingUser(null);
         setUserForm({
-          full_name: '',
           username: '',
-          phone_number: '',
           email: '',
           password: '',
-          confirmPassword: '',
-          role: 'cashier'
+          confirmPassword: ''
         });
+        addToast('success', editingUser ? 'User updated successfully' : 'User created successfully');
       } else {
         const data = await res.json();
-        alert(data.error || "Failed to save user");
+        addToast('error', data.error || "Failed to save user");
       }
     } catch (err) {
       console.error("Error saving user:", err);
+      addToast('error', 'Failed to save user');
     }
   };
 
@@ -197,13 +267,23 @@ export default function App() {
 
   const openEditModal = (user: UserData) => {
     setEditingUser(user);
-    setUserForm({ ...user, password: '', confirmPassword: '' });
+    setUserForm({ 
+      username: user.username, 
+      email: user.email || '', 
+      password: '', 
+      confirmPassword: '',
+      full_name: user.full_name,
+      role: user.role,
+      phone_number: user.phone_number || '',
+      is_active: user.is_active || 1
+    });
     setIsUserModalOpen(true);
   };
 
   if (view === 'login') {
     return (
       <div className="h-[100dvh] w-full flex items-center justify-center p-4 relative overflow-hidden bg-[#050505] fixed inset-0">
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
         <motion.div 
           animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.15, 0.1], x: [0, 20, 0], y: [0, -20, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
@@ -257,6 +337,7 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-full bg-[#050505] text-white flex flex-col overflow-hidden">
+      <ToastContainer toasts={toasts} removeToast={removeToast} />
       {/* Header */}
       <header className="h-16 flex items-center justify-between px-4 border-b border-white/5 z-20 bg-[#050505]/80 backdrop-blur-md">
         <div className="flex items-center gap-4">
@@ -391,13 +472,14 @@ export default function App() {
                   onClick={() => {
                     setEditingUser(null);
                     setUserForm({
-                      full_name: '',
                       username: '',
-                      phone_number: '',
                       email: '',
                       password: '',
                       confirmPassword: '',
-                      role: 'cashier'
+                      full_name: '',
+                      role: 'cashier',
+                      phone_number: '',
+                      is_active: 1
                     });
                     setIsUserModalOpen(true);
                   }}
@@ -420,16 +502,18 @@ export default function App() {
                     <div className="flex items-start justify-between mb-6 relative z-10">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center font-bold text-lg border border-blue-500/20">
-                          {user.full_name ? user.full_name.charAt(0) : (user.username ? user.username.charAt(0) : '?')}
+                          {user.full_name ? user.full_name.charAt(0).toUpperCase() : '?'}
                         </div>
                         <div>
-                          <p className="font-bold text-lg tracking-tight">{user.full_name || 'Unnamed User'}</p>
-                          <p className="text-xs text-zinc-500 font-medium">{user.username ? `@${user.username}` : 'No username'}</p>
+                          <p className="font-bold text-lg tracking-tight">{user.full_name}</p>
+                          <p className="text-xs text-zinc-500 font-medium">@{user.username}</p>
                         </div>
                       </div>
                       <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         user.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400' :
                         user.role === 'manager' ? 'bg-blue-500/10 text-blue-400' :
+                        user.role === 'sales' ? 'bg-emerald-500/10 text-emerald-400' :
+                        user.role === 'inventory' ? 'bg-amber-500/10 text-amber-400' :
                         'bg-zinc-500/10 text-zinc-400'
                       }`}>
                         {user.role}
@@ -441,14 +525,16 @@ export default function App() {
                         <div className="p-1.5 rounded-lg bg-white/5">
                           <User size={14} className="opacity-70" />
                         </div>
-                        <span className="text-xs font-medium truncate">{user.email || 'No email provided'}</span>
+                        <span className="text-xs font-medium truncate">{user.email}</span>
                       </div>
-                      <div className="flex items-center gap-3 text-zinc-400">
-                        <div className="p-1.5 rounded-lg bg-white/5">
-                          <Lock size={14} className="opacity-70" />
+                      {user.phone_number && (
+                        <div className="flex items-center gap-3 text-zinc-400">
+                          <div className="p-1.5 rounded-lg bg-white/5">
+                            <Lock size={14} className="opacity-70" />
+                          </div>
+                          <span className="text-xs font-medium">{user.phone_number}</span>
                         </div>
-                        <span className="text-xs font-medium">{user.phone_number || 'No phone number'}</span>
-                      </div>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3 pt-6 border-t border-white/5 relative z-10">
@@ -545,79 +631,93 @@ export default function App() {
               <form onSubmit={handleSaveUser} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Full Name (Optional)</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Full Name</label>
                     <input 
                       type="text"
+                      required
                       value={userForm.full_name}
                       onChange={e => setUserForm({...userForm, full_name: e.target.value})}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Username (Optional)</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Username</label>
                     <input 
                       type="text"
+                      required
                       value={userForm.username}
                       onChange={e => setUserForm({...userForm, username: e.target.value})}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Phone Number (Optional)</label>
-                    <input 
-                      type="text"
-                      value={userForm.phone_number}
-                      onChange={e => setUserForm({...userForm, phone_number: e.target.value})}
-                      className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Email (Optional)</label>
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Email</label>
                     <input 
                       type="email"
+                      required
                       value={userForm.email}
                       onChange={e => setUserForm({...userForm, email: e.target.value})}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
                     />
                   </div>
-                  
-                  {!editingUser && (
-                    <>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Password</label>
-                        <input 
-                          type="password" required
-                          value={userForm.password}
-                          onChange={e => setUserForm({...userForm, password: e.target.value})}
-                          className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Confirm Password</label>
-                        <input 
-                          type="password" required
-                          value={userForm.confirmPassword}
-                          onChange={e => setUserForm({...userForm, confirmPassword: e.target.value})}
-                          className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  <div className="space-y-2 md:col-span-2">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Phone Number</label>
+                    <input 
+                      type="text"
+                      value={userForm.phone_number || ''}
+                      onChange={e => setUserForm({...userForm, phone_number: e.target.value})}
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Role</label>
                     <select 
                       value={userForm.role}
                       onChange={e => setUserForm({...userForm, role: e.target.value as any})}
                       className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 appearance-none"
                     >
-                      <option value="cashier" className="bg-[#0a0a0a]">Cashier</option>
                       <option value="admin" className="bg-[#0a0a0a]">Admin</option>
                       <option value="manager" className="bg-[#0a0a0a]">Manager</option>
+                      <option value="cashier" className="bg-[#0a0a0a]">Cashier</option>
                       <option value="sales" className="bg-[#0a0a0a]">Sales</option>
                       <option value="inventory" className="bg-[#0a0a0a]">Inventory</option>
                     </select>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Status</label>
+                    <select 
+                      value={userForm.is_active}
+                      onChange={e => setUserForm({...userForm, is_active: parseInt(e.target.value)})}
+                      className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50 appearance-none"
+                    >
+                      <option value={1} className="bg-[#0a0a0a]">Active</option>
+                      <option value={0} className="bg-[#0a0a0a]">Inactive</option>
+                    </select>
+                  </div>
+                  
+                  {!editingUser && (
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">Password</label>
+                      <input 
+                        type="password" required
+                        value={userForm.password}
+                        onChange={e => setUserForm({...userForm, password: e.target.value})}
+                        className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
+                      />
+                    </div>
+                  )}
+                  
+                  {editingUser && (
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">New Password (leave blank to keep current)</label>
+                      <input 
+                        type="password"
+                        value={userForm.password}
+                        onChange={e => setUserForm({...userForm, password: e.target.value})}
+                        className="w-full bg-white/[0.03] border border-white/10 rounded-2xl py-3.5 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500/50"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-4 pt-4">
