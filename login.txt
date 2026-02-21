@@ -1,7 +1,7 @@
 Flutter API Login Implementation Guide
 =======================================
 
-Base URL: https://your-app.onrender.com
+Base URL: https://adminerp.onrender.com/
 
 1. LOGIN API (Session Token)
 ---------------------------

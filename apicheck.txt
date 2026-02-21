@@ -1,0 +1,204 @@
+# Postman API Testing Guide
+# =========================
+
+# Import these cURL commands into Postman or run directly
+
+# ============================================
+# 1. ADMIN LOGIN (Web Dashboard)
+# ============================================
+
+# POST /api/login
+# Login as admin to get session token
+curl -X POST https://your-app.onrender.com/api/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identifier": "sebri_admin",
+    "password": "sebri2026"
+  }'
+
+# Response:
+# {
+#   "success": true,
+#   "token": "abc123...",
+#   "expiresIn": 86400000,
+#   "user": {
+#     "id": 1,
+#     "username": "sebri_admin",
+#     "email": "admin@sebri.com"
+#   }
+# }
+
+
+# ============================================
+# 2. MOBILE LOGIN (Flutter/App)
+# ============================================
+
+# POST /api/mobile/login
+# Login as mobile user (from users table)
+curl -X POST https://your-app.onrender.com/api/mobile/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identifier": "admin1",
+    "password": "12345"
+  }'
+
+# Or use phone number:
+curl -X POST https://your-app.onrender.com/api/mobile/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "identifier": "081211111111",
+    "password": "12345"
+  }'
+
+# Response:
+# {
+#   "success": true,
+#   "message": "Login successful",
+#   "token": "xyz789...",
+#   "expiresIn": 86400000,
+#   "user": {
+#     "id": 1,
+#     "username": "admin1",
+#     "email": "admin1@example.com",
+#     "full_name": "Admin User",
+#     "role": "admin",
+#     "phone_number": "081211111111"
+#   }
+# }
+
+
+# ============================================
+# 3. VERIFY TOKEN
+# ============================================
+
+# GET /api/auth/verify
+# Replace <TOKEN> with actual token from login response
+curl -X GET https://your-app.onrender.com/api/auth/verify \
+  -H "Authorization: Bearer <TOKEN>"
+
+
+# ============================================
+# 4. GET ALL USERS
+# ============================================
+
+# GET /api/users (Protected - requires auth)
+curl -X GET https://your-app.onrender.com/api/users \
+  -H "Authorization: Bearer <TOKEN>"
+
+
+# ============================================
+# 5. CREATE USER
+# ============================================
+
+# POST /api/users (Protected - requires auth)
+curl -X POST https://your-app.onrender.com/api/users \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "newuser",
+    "email": "newuser@example.com",
+    "password": "password123",
+    "full_name": "New User",
+    "role": "cashier",
+    "phone_number": "081299999999"
+  }'
+
+
+# ============================================
+# 6. UPDATE USER
+# ============================================
+
+# PUT /api/users/:id (Protected - requires auth)
+curl -X PUT https://your-app.onrender.com/api/users/1 \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "updateduser",
+    "email": "updated@example.com",
+    "full_name": "Updated Name",
+    "role": "manager",
+    "phone_number": "081288888888",
+    "is_active": 1
+  }'
+
+
+# ============================================
+# 7. DELETE USER
+# ============================================
+
+# DELETE /api/users/:id (Protected - requires auth)
+curl -X DELETE https://your-app.onrender.com/api/users/1 \
+  -H "Authorization: Bearer <TOKEN>"
+
+
+# ============================================
+# 8. LOGOUT
+# ============================================
+
+# POST /api/logout
+curl -X POST https://your-app.onrender.com/api/logout \
+  -H "Authorization: Bearer <TOKEN>"
+
+
+# ============================================
+# 9. API KEY AUTH (Alternative)
+# ============================================
+
+# Generate API key (Admin only)
+# First login as admin, then:
+curl -X POST https://your-app.onrender.com/api/keys \
+  -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Flutter App"
+  }'
+
+# Response:
+# {
+#   "success": true,
+#   "apiKey": "sk_abc123...",
+#   "expiresIn": 7776000000,
+#   "message": "Save this API key - it won't be shown again"
+# }
+
+# Use API key instead of Bearer token:
+curl -X GET https://your-app.onrender.com/api/users \
+  -H "Authorization: sk_abc123..."
+
+
+# ============================================
+# 10. DATABASE STATUS
+# ============================================
+
+# GET /api/db-status (Public)
+curl -X GET https://your-app.onrender.com/api/db-status
+
+
+# ============================================
+# ERROR RESPONSES
+# ============================================
+
+# 401 Unauthorized
+# {
+#   "error": "Unauthorized"
+# }
+
+# 401 Session Expired
+# {
+#   "error": "Session expired or invalid"
+# }
+
+# 401 Invalid API Key
+# {
+#   "error": "Invalid or expired API key"
+# }
+
+# 403 Forbidden (Admin only)
+# {
+#   "error": "Admin access required"
+# }
+
+# 429 Rate Limited
+# {
+#   "error": "Too many login attempts. Please try again in 15 minutes."
+# }
