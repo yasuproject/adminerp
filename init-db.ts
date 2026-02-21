@@ -70,20 +70,22 @@ async function initDb() {
       
       const firstNames = ['Ahmad', 'Budi', 'Charlie', 'Dedi', 'Eko', 'Fajar', 'Galih', 'Hadi', 'Indra', 'Joko'];
       const lastNames = ['Saputra', 'Wijaya', 'Kurniawan', 'Santoso', 'Pratama', 'Wibowo', 'Susanto', 'Hidayat', 'Permana', 'Rahman'];
+      const roles = ['admin', 'manager', 'cashier', 'cashier', 'cashier'];
       
       for (let i = 0; i < 10; i++) {
-        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-        const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+        const firstName = firstNames[i];
+        const lastName = lastNames[i];
         const fullName = `${firstName} ${lastName}`;
         const username = `${firstName.toLowerCase()}${i + 1}`;
         const phone = `0812${Math.floor(10000000 + Math.random() * 90000000)}`;
+        const role = roles[i % roles.length];
         
         await connection.query(
           "INSERT INTO users (username, email, password, full_name, role, phone_number) VALUES (?, ?, ?, ?, ?, ?)",
-          [username, `${username}@example.com`, hashedPassword, fullName, 'cashier', phone]
+          [username, `${username}@example.com`, hashedPassword, fullName, role, phone]
         );
       }
-      console.log("Created 10 random users with password: 12345");
+      console.log("Created 10 random users with different roles (password: 12345)");
     }
 
     console.log("Database tables created successfully!");
