@@ -7,7 +7,7 @@
     "dev": "vite-node server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node --loader tsx server.ts",
+    "start": "node --import tsx server.ts",
     "init-db": "tsx init-db.ts",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
