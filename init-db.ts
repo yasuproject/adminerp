@@ -63,6 +63,29 @@ async function initDb() {
       console.log("Default admin created: sebri_admin / sebri2026");
     }
 
+    const [userRows]: any = await connection.query("SELECT COUNT(*) as count FROM users");
+    if (userRows[0].count === 0) {
+      console.log("Seeding random users...");
+      const hashedPassword = await bcrypt.hash('12345', 10);
+      
+      const firstNames = ['Ahmad', 'Budi', 'Charlie', 'Dedi', 'Eko', 'Fajar', 'Galih', 'Hadi', 'Indra', 'Joko'];
+      const lastNames = ['Saputra', 'Wijaya', 'Kurniawan', 'Santoso', 'Pratama', 'Wibowo', 'Susanto', 'Hidayat', 'Permana', 'Rahman'];
+      
+      for (let i = 0; i < 10; i++) {
+        const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+        const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+        const fullName = `${firstName} ${lastName}`;
+        const username = `${firstName.toLowerCase()}${i + 1}`;
+        const phone = `0812${Math.floor(10000000 + Math.random() * 90000000)}`;
+        
+        await connection.query(
+          "INSERT INTO users (username, email, password, full_name, role, phone_number) VALUES (?, ?, ?, ?, ?, ?)",
+          [username, `${username}@example.com`, hashedPassword, fullName, 'cashier', phone]
+        );
+      }
+      console.log("Created 10 random users with password: 12345");
+    }
+
     console.log("Database tables created successfully!");
     connection.release();
     process.exit(0);
