@@ -65,27 +65,23 @@ async function initDb() {
 
     const [userRows]: any = await connection.query("SELECT COUNT(*) as count FROM users");
     if (userRows[0].count === 0) {
-      console.log("Seeding random users...");
+      console.log("Seeding users...");
       const hashedPassword = await bcrypt.hash('12345', 10);
       
-      const firstNames = ['Ahmad', 'Budi', 'Charlie', 'Dedi', 'Eko', 'Fajar', 'Galih', 'Hadi', 'Indra', 'Joko'];
-      const lastNames = ['Saputra', 'Wijaya', 'Kurniawan', 'Santoso', 'Pratama', 'Wibowo', 'Susanto', 'Hidayat', 'Permana', 'Rahman'];
-      const roles = ['admin', 'manager', 'cashier', 'cashier', 'cashier'];
+      const users = [
+        { username: 'admin1', fullName: 'Admin User', role: 'admin', phone: '081211111111' },
+        { username: 'manager1', fullName: 'Manager User', role: 'manager', phone: '081222222222' },
+        { username: 'cashier1', fullName: 'Cashier User', role: 'cashier', phone: '081233333333' },
+        { username: 'sales1', fullName: 'Sales User', role: 'sales', phone: '081244444444' },
+      ];
       
-      for (let i = 0; i < 10; i++) {
-        const firstName = firstNames[i];
-        const lastName = lastNames[i];
-        const fullName = `${firstName} ${lastName}`;
-        const username = `${firstName.toLowerCase()}${i + 1}`;
-        const phone = `0812${Math.floor(10000000 + Math.random() * 90000000)}`;
-        const role = roles[i % roles.length];
-        
+      for (const user of users) {
         await connection.query(
           "INSERT INTO users (username, email, password, full_name, role, phone_number) VALUES (?, ?, ?, ?, ?, ?)",
-          [username, `${username}@example.com`, hashedPassword, fullName, role, phone]
+          [user.username, `${user.username}@example.com`, hashedPassword, user.fullName, user.role, user.phone]
         );
       }
-      console.log("Created 10 random users with different roles (password: 12345)");
+      console.log("Created 4 users: admin, manager, cashier, sales (password: 12345)");
     }
 
     console.log("Database tables created successfully!");
