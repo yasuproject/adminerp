@@ -218,14 +218,12 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     try {
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: { overlay: false } },
         appType: "spa",
-        configFile: false,
-        plugins: []
       });
       app.use(vite.middlewares);
-    } catch (e) {
-      console.log("Vite not available, serving static files only");
+    } catch (e: any) {
+      console.log("Vite not available:", e.message);
     }
   } else {
     app.use(express.static("dist"));
