@@ -130,8 +130,8 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
 export default function App() {
   const [view, setView] = useState<View>('login');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
+  const [identifier, setIdentifier] = useState('sebri_admin');
+  const [password, setPassword] = useState('sebri2026');
   const [isLoading, setIsLoading] = useState(false);
   const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [activeTab, setActiveTab] = useState('Home');
