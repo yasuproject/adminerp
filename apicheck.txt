@@ -38,15 +38,7 @@ curl -X POST https://your-app.onrender.com/api/login \
 curl -X POST https://your-app.onrender.com/api/mobile/login \
   -H "Content-Type: application/json" \
   -d '{
-    "identifier": "admin1",
-    "password": "12345"
-  }'
-
-# Or use phone number:
-curl -X POST https://your-app.onrender.com/api/mobile/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "identifier": "081211111111",
+    "username": "admin1",
     "password": "12345"
   }'
 

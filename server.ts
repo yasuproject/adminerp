@@ -304,13 +304,13 @@ async function startServer() {
   };
 
   app.post("/api/mobile/login", async (req, res) => {
-    const { identifier, password } = req.body;
+    const { username, password } = req.body;
     
-    if (!identifier || !password) {
-      return res.status(400).json({ error: "Identifier and password are required" });
+    if (!username || !password) {
+      return res.status(400).json({ error: "Username and password are required" });
     }
 
-    if (isMobileRateLimited(identifier)) {
+    if (isMobileRateLimited(username)) {
       return res.status(429).json({ 
         error: "Too many login attempts. Please try again in 15 minutes." 
       });
@@ -318,12 +318,12 @@ async function startServer() {
 
     try {
       const [rows]: any = await pool.query(
-        "SELECT * FROM users WHERE (username = ? OR phone_number = ?) AND is_active = 1",
-        [identifier, identifier]
+        "SELECT * FROM users WHERE username = ? AND is_active = 1",
+        [username]
       );
       
       if (rows.length === 0) {
-        resetMobileRateLimit(identifier);
+        resetMobileRateLimit(username);
         return res.status(401).json({ error: "Invalid credentials or account inactive" });
       }
       
@@ -334,7 +334,7 @@ async function startServer() {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
-      resetMobileRateLimit(identifier);
+      resetMobileRateLimit(username);
       await pool.query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
       
       const token = generateToken();

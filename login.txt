@@ -13,7 +13,7 @@ final response = await http.post(
   Uri.parse('$baseUrl/api/mobile/login'),
   headers: {'Content-Type': 'application/json'},
   body: jsonEncode({
-    'identifier': 'admin1', // username or phone_number
+    'username': 'admin1',
     'password': '12345',
   }),
 );
