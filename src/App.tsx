@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   User, Lock, ArrowRight, Menu, X, Home, 
   BarChart2, Settings, Users, Package, 
-  LogOut, Bell, Search, ChevronRight
+  LogOut, Bell, Search, ChevronRight, AlertTriangle, CheckCircle
 } from 'lucide-react';
 
 // --- Types ---
@@ -127,14 +127,103 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
   </div>
 );
 
+interface ConfirmDialogProps {
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  type?: 'danger' | 'warning' | 'info';
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const ConfirmDialog = ({ isOpen, title, message, confirmText = 'Confirm', cancelText = 'Cancel', type = 'danger', onConfirm, onCancel }: ConfirmDialogProps) => (
+  <AnimatePresence>
+    {isOpen && (
+      <div className="fixed inset-0 flex items-center justify-center p-4 z-[200]">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          onClick={onCancel}
+          className="absolute inset-0 bg-black/80 backdrop-blur-md"
+        />
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.9, y: 20 }}
+          className={`relative w-full max-w-md bg-[#0a0a0a] border rounded-[2rem] p-8 z-10 shadow-2xl ${
+            type === 'danger' ? 'border-red-500/30' :
+            type === 'warning' ? 'border-amber-500/30' : 'border-blue-500/30'
+          }`}
+        >
+          <div className={`w-16 h-16 mx-auto mb-6 rounded-full flex items-center justify-center ${
+            type === 'danger' ? 'bg-red-500/10' :
+            type === 'warning' ? 'bg-amber-500/10' : 'bg-blue-500/10'
+          }`}>
+            {type === 'danger' ? (
+              <AlertTriangle size={32} className="text-red-500" />
+            ) : type === 'warning' ? (
+              <AlertTriangle size={32} className="text-amber-500" />
+            ) : (
+              <CheckCircle size={32} className="text-blue-500" />
+            )}
+          </div>
+          <h3 className="text-xl font-bold text-center mb-2">{title}</h3>
+          <p className="text-zinc-400 text-center text-sm mb-8">{message}</p>
+          <div className="flex gap-4">
+            <button 
+              onClick={onCancel}
+              className="flex-1 py-4 rounded-2xl bg-white/5 border border-white/10 font-bold hover:bg-white/10 transition-colors"
+            >
+              {cancelText}
+            </button>
+            <button 
+              onClick={onConfirm}
+              className={`flex-1 py-4 rounded-2xl font-bold transition-colors shadow-lg ${
+                type === 'danger' ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-600/20' :
+                type === 'warning' ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/20' :
+                'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20'
+              }`}
+            >
+              {confirmText}
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    )}
+  </AnimatePresence>
+);
+
 export default function App() {
   const [view, setView] = useState<View>('login');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [identifier, setIdentifier] = useState('sebri_admin');
-  const [password, setPassword] = useState('sebri2026');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   const [activeTab, setActiveTab] = useState('Home');
+  
+  // Session State
+  const [authToken, setAuthToken] = useState<string | null>(localStorage.getItem('authToken'));
+  const [currentUser, setCurrentUser] = useState<{id: number; username: string; email: string} | null>(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+  
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'danger',
+    onConfirm: () => {}
+  });
   
   // Toast State
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -162,20 +251,53 @@ export default function App() {
     is_active: 1
   });
 
+  // Verify session on mount
+  useEffect(() => {
+    const verifySession = async () => {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        try {
+          const res = await fetch('/api/auth/verify', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setAuthToken(token);
+            setCurrentUser(data.user);
+            setView('dashboard');
+          } else {
+            localStorage.removeItem('authToken');
+          }
+        } catch {
+          localStorage.removeItem('authToken');
+        }
+      }
+      setIsAuthenticating(false);
+    };
+    
+    verifySession();
+  }, []);
+
   useEffect(() => {
     fetch('/api/db-status')
       .then(res => res.ok ? setDbStatus('connected') : setDbStatus('error'))
       .catch(() => setDbStatus('error'));
     
-    fetchUsers();
-  }, []);
+    if (authToken) {
+      fetchUsers();
+    }
+  }, [authToken]);
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/users');
+      const res = await fetch('/api/users', {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
       if (res.ok) {
         const data = await res.json();
         setUsers(data);
+      } else if (res.status === 401) {
+        handleLogout();
       }
     } catch (err) {
       console.error("Failed to fetch users:", err);
@@ -194,8 +316,13 @@ export default function App() {
       const data = await res.json();
       
       if (res.ok) {
+        localStorage.setItem('authToken', data.token);
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
         addToast('success', `Welcome back, ${data.user.username}!`);
         setView('dashboard');
+        setIdentifier('');
+        setPassword('');
       } else {
         addToast('error', data.error || 'Login failed');
       }
@@ -206,7 +333,18 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (authToken) {
+      try {
+        await fetch('/api/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+      } catch {}
+    }
+    localStorage.removeItem('authToken');
+    setAuthToken(null);
+    setCurrentUser(null);
     setView('login');
     setIsDrawerOpen(false);
   };
@@ -230,7 +368,10 @@ export default function App() {
       
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        },
         body: JSON.stringify(payload)
       });
 
@@ -242,7 +383,11 @@ export default function App() {
           username: '',
           email: '',
           password: '',
-          confirmPassword: ''
+          confirmPassword: '',
+          full_name: '',
+          role: 'cashier',
+          phone_number: '',
+          is_active: 1
         });
         addToast('success', editingUser ? 'User updated successfully' : 'User created successfully');
       } else {
@@ -255,14 +400,34 @@ export default function App() {
     }
   };
 
-  const handleDeleteUser = async (id: number) => {
-    if (!confirm("Are you sure you want to delete this user?")) return;
-    try {
-      const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchUsers();
-    } catch (err) {
-      console.error("Error deleting user:", err);
-    }
+  const handleDeleteUser = (id: number) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Delete User',
+      message: 'Are you sure you want to delete this user? This action cannot be undone.',
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/users/${id}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          });
+          if (res.ok) {
+            fetchUsers();
+            addToast('success', 'User deleted successfully');
+          } else if (res.status === 401) {
+            handleLogout();
+          } else {
+            const data = await res.json();
+            addToast('error', data.error || 'Failed to delete user');
+          }
+        } catch (err) {
+          console.error("Error deleting user:", err);
+          addToast('error', 'Failed to delete user');
+        }
+        setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const openEditModal = (user: UserData) => {
@@ -281,9 +446,24 @@ export default function App() {
   };
 
   if (view === 'login') {
+    if (isAuthenticating) {
+      return (
+        <div className="h-[100dvh] w-full flex items-center justify-center bg-[#050505]">
+          <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+        </div>
+      );
+    }
     return (
       <div className="h-[100dvh] w-full flex items-center justify-center p-4 relative overflow-hidden bg-[#050505] fixed inset-0">
         <ToastContainer toasts={toasts} removeToast={removeToast} />
+        <ConfirmDialog 
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          type={confirmDialog.type}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+        />
         <motion.div 
           animate={{ scale: [1, 1.1, 1], opacity: [0.1, 0.15, 0.1], x: [0, 20, 0], y: [0, -20, 0] }}
           transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
@@ -338,6 +518,14 @@ export default function App() {
   return (
     <div className="h-[100dvh] w-full bg-[#050505] text-white flex flex-col overflow-hidden">
       <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ConfirmDialog 
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        type={confirmDialog.type}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
       {/* Header */}
       <header className="h-16 flex items-center justify-between px-4 border-b border-white/5 z-20 bg-[#050505]/80 backdrop-blur-md">
         <div className="flex items-center gap-4">

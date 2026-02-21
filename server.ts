@@ -3,8 +3,51 @@ import { createServer as createViteServer } from "vite";
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 dotenv.config();
+
+const sessions = new Map();
+const loginAttempts = new Map();
+
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS = 5;
+const SESSION_EXPIRY = 24 * 60 * 60 * 1000;
+
+function generateToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function isRateLimited(identifier: string): boolean {
+  const now = Date.now();
+  const attempts = loginAttempts.get(identifier);
+  
+  if (!attempts || now - attempts.firstAttempt > RATE_LIMIT_WINDOW) {
+    loginAttempts.set(identifier, { count: 1, firstAttempt: now });
+    return false;
+  }
+  
+  if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+    return true;
+  }
+  
+  attempts.count++;
+  return false;
+}
+
+function resetRateLimit(identifier: string) {
+  loginAttempts.delete(identifier);
+}
+
+function validateSession(token: string) {
+  const session = sessions.get(token);
+  if (!session) return null;
+  if (Date.now() - session.createdAt > SESSION_EXPIRY) {
+    sessions.delete(token);
+    return null;
+  }
+  return session;
+}
 
 async function startServer() {
   const app = express();
@@ -28,7 +71,24 @@ async function startServer() {
   // API routes
   app.use(express.json());
 
-  app.get("/api/users", async (req, res) => {
+  // Auth middleware
+  const authMiddleware = (req: any, res: any, next: any) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    
+    const session = validateSession(token);
+    if (!session) {
+      return res.status(401).json({ error: "Session expired" });
+    }
+    
+    req.user = session;
+    next();
+  };
+
+  // Protected routes
+  app.get("/api/users", authMiddleware, async (req, res) => {
     try {
       const [rows] = await pool.query("SELECT id, username, email, full_name, role, phone_number, is_active, created_at, last_login FROM users ORDER BY created_at DESC");
       res.json(rows);
@@ -37,7 +97,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/users", async (req, res) => {
+  app.post("/api/users", authMiddleware, async (req, res) => {
     const { username, email, password, full_name, role, phone_number } = req.body;
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -53,6 +113,13 @@ async function startServer() {
 
   app.post("/api/login", async (req, res) => {
     const { identifier, password } = req.body;
+    
+    if (isRateLimited(identifier)) {
+      return res.status(429).json({ 
+        error: "Too many login attempts. Please try again in 15 minutes." 
+      });
+    }
+    
     try {
       const [rows]: any = await pool.query(
         "SELECT * FROM admins WHERE username = ? OR email = ?",
@@ -60,6 +127,7 @@ async function startServer() {
       );
       
       if (rows.length === 0) {
+        resetRateLimit(identifier);
         return res.status(401).json({ error: "Invalid credentials" });
       }
       
@@ -70,11 +138,22 @@ async function startServer() {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      resetRateLimit(identifier);
       await pool.query("UPDATE admins SET last_login = NOW() WHERE id = ?", [admin.id]);
+      
+      const token = generateToken();
+      sessions.set(token, {
+        userId: admin.id,
+        username: admin.username,
+        email: admin.email,
+        createdAt: Date.now()
+      });
       
       res.json({ 
         success: true, 
         message: "Login successful",
+        token,
+        expiresIn: SESSION_EXPIRY,
         user: { id: admin.id, username: admin.username, email: admin.email }
       });
     } catch (error: any) {
@@ -82,7 +161,32 @@ async function startServer() {
     }
   });
 
-  app.put("/api/users/:id", async (req, res) => {
+  app.post("/api/logout", (req, res) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (token && sessions.has(token)) {
+      sessions.delete(token);
+    }
+    res.json({ success: true, message: "Logged out" });
+  });
+
+  app.get("/api/auth/verify", (req, res) => {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) {
+      return res.status(401).json({ authenticated: false });
+    }
+    
+    const session = validateSession(token);
+    if (!session) {
+      return res.status(401).json({ authenticated: false });
+    }
+    
+    res.json({ 
+      authenticated: true,
+      user: { id: session.userId, username: session.username, email: session.email }
+    });
+  });
+
+  app.put("/api/users/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     const { username, email, password, full_name, role, phone_number, is_active } = req.body;
     try {
@@ -104,7 +208,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/users/:id", async (req, res) => {
+  app.delete("/api/users/:id", authMiddleware, async (req, res) => {
     const { id } = req.params;
     try {
       await pool.query("DELETE FROM users WHERE id = ?", [id]);
