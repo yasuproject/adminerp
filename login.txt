@@ -1,0 +1,109 @@
+Flutter API Login Implementation Guide
+========================================
+
+Base URL: https://your-render-app.onrender.com
+
+1. LOGIN API
+-----------
+Endpoint: POST /api/mobile/login
+
+Request:
+```dart
+final response = await http.post(
+  Uri.parse('$baseUrl/api/mobile/login'),
+  headers: {'Content-Type': 'application/json'},
+  body: jsonEncode({
+    'identifier': 'admin1', // username or phone_number
+    'password': '12345',
+  }),
+);
+```
+
+Success Response (200):
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "token": "abc123...",
+  "expiresIn": 86400000,
+  "user": {
+    "id": 1,
+    "username": "admin1",
+    "email": "admin1@example.com",
+    "full_name": "Admin User",
+    "role": "admin",
+    "phone_number": "081211111111"
+  }
+}
+```
+
+Error Response (401):
+```json
+{
+  "error": "Invalid credentials or account inactive"
+}
+```
+
+Error Response (429):
+```json
+{
+  "error": "Too many login attempts. Please try again in 15 minutes."
+}
+```
+
+2. SAVE TOKEN
+-------------
+```dart
+// Save token to secure storage
+await SecureStorage().write(key: 'auth_token', value: token);
+await SecureStorage().write(key: 'user_data', value: jsonEncode(user));
+```
+
+3. AUTHENTICATED REQUESTS
+-------------------------
+For protected endpoints, include the token in the header:
+
+```dart
+final token = await SecureStorage().read(key: 'auth_token');
+
+final response = await http.get(
+  Uri.parse('$baseUrl/api/users'),
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $token',
+  },
+);
+```
+
+4. LOGOUT
+--------
+```dart
+await http.post(
+  Uri.parse('$baseUrl/api/logout'),
+  headers: {
+    'Authorization': 'Bearer $token',
+  },
+);
+await SecureStorage().delete(key: 'auth_token');
+await SecureStorage().delete(key: 'user_data');
+```
+
+5. ERROR HANDLING
+----------------
+```dart
+if (response.statusCode == 401) {
+  // Token expired or invalid - redirect to login
+} else if (response.statusCode == 429) {
+  // Rate limited - show cooldown message
+} else if (response.statusCode == 500) {
+  // Server error - show retry option
+}
+```
+
+6. ADDITIONAL APIS
+-----------------
+GET /api/users - List all users (requires auth)
+POST /api/users - Create user (requires auth)
+PUT /api/users/:id - Update user (requires auth)
+DELETE /api/users/:id - Delete user (requires auth)
+GET /api/auth/verify - Verify token validity
