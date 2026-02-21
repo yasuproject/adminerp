@@ -1,10 +1,10 @@
 Flutter API Login Implementation Guide
-========================================
+=======================================
 
-Base URL: https://your-render-app.onrender.com
+Base URL: https://your-app.onrender.com
 
-1. LOGIN API
------------
+1. LOGIN API (Session Token)
+---------------------------
 Endpoint: POST /api/mobile/login
 
 Request:
@@ -52,7 +52,7 @@ Error Response (429):
 ```
 
 2. SAVE TOKEN
--------------
+------------
 ```dart
 // Save token to secure storage
 await SecureStorage().write(key: 'auth_token', value: token);
@@ -61,7 +61,7 @@ await SecureStorage().write(key: 'user_data', value: jsonEncode(user));
 
 3. AUTHENTICATED REQUESTS
 -------------------------
-For protected endpoints, include the token in the header:
+Use Bearer token for authenticated requests:
 
 ```dart
 final token = await SecureStorage().read(key: 'auth_token');
@@ -75,9 +75,28 @@ final response = await http.get(
 );
 ```
 
-4. LOGOUT
+4. API KEY AUTH (Alternative for server-to-server)
+-------------------------------------------------
+Instead of Bearer token, you can use API keys (for production apps):
+
+```dart
+// Generate API key from admin dashboard, then use:
+final apiKey = 'sk_abc123...';
+
+final response = await http.get(
+  Uri.parse('$baseUrl/api/users'),
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': apiKey,  // No "Bearer" prefix for API keys
+  },
+);
+```
+
+5. LOGOUT
 --------
 ```dart
+final token = await SecureStorage().read(key: 'auth_token');
+
 await http.post(
   Uri.parse('$baseUrl/api/logout'),
   headers: {
@@ -88,7 +107,7 @@ await SecureStorage().delete(key: 'auth_token');
 await SecureStorage().delete(key: 'user_data');
 ```
 
-5. ERROR HANDLING
+6. ERROR HANDLING
 ----------------
 ```dart
 if (response.statusCode == 401) {
@@ -100,10 +119,33 @@ if (response.statusCode == 401) {
 }
 ```
 
-6. ADDITIONAL APIS
------------------
-GET /api/users - List all users (requires auth)
-POST /api/users - Create user (requires auth)
-PUT /api/users/:id - Update user (requires auth)
-DELETE /api/users/:id - Delete user (requires auth)
-GET /api/auth/verify - Verify token validity
+7. API ENDPOINTS
+---------------
+GET    /api/users           - List all users (requires auth)
+POST   /api/users           - Create user (requires auth)
+PUT    /api/users/:id       - Update user (requires auth)
+DELETE /api/users/:id       - Delete user (requires auth)
+GET    /api/auth/verify     - Verify token validity
+
+8. ADMIN API KEY MANAGEMENT (Admin only)
+---------------------------------------
+POST   /api/keys           - Generate new API key
+GET    /api/keys           - List all API keys
+DELETE /api/keys/:keyHash  - Revoke API key
+
+Generate API key example:
+```dart
+final response = await http.post(
+  Uri.parse('$baseUrl/api/keys'),
+  headers: {
+    'Authorization': 'Bearer $adminToken',
+    'Content-Type': 'application/json',
+  },
+  body: jsonEncode({
+    'name': 'My Flutter App',
+  }),
+);
+
+final data = jsonDecode(response.body);
+// data['apiKey'] = 'sk_abc123...'
+```

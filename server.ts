@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { createServer as createViteServer } from "vite";
 import mysql from "mysql2/promise";
 import dotenv from "dotenv";
@@ -7,15 +7,41 @@ import crypto from "crypto";
 
 dotenv.config();
 
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        type: string;
+        userId: number;
+        username?: string;
+        email?: string;
+        role?: string;
+        name?: string;
+      };
+    }
+  }
+}
+
 const sessions = new Map();
+const apiKeys = new Map();
 const loginAttempts = new Map();
+const refreshTokens = new Map();
 
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000;
 const MAX_LOGIN_ATTEMPTS = 5;
 const SESSION_EXPIRY = 24 * 60 * 60 * 1000;
+const API_KEY_EXPIRY = 90 * 24 * 60 * 60 * 1000;
 
 function generateToken() {
   return crypto.randomBytes(32).toString("hex");
+}
+
+function generateApiKey() {
+  return `sk_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+function hashApiKey(key: string) {
+  return crypto.createHash("sha256").update(key).digest("hex");
 }
 
 function isRateLimited(identifier: string): boolean {
@@ -46,7 +72,19 @@ function validateSession(token: string) {
     sessions.delete(token);
     return null;
   }
+  sessions.set(token, { ...session, lastActivity: Date.now() });
   return session;
+}
+
+function validateApiKey(apiKey: string) {
+  const keyHash = hashApiKey(apiKey);
+  const keyData = apiKeys.get(keyHash);
+  if (!keyData) return null;
+  if (Date.now() > keyData.expiresAt) {
+    apiKeys.delete(keyHash);
+    return null;
+  }
+  return keyData;
 }
 
 async function startServer() {
@@ -71,21 +109,93 @@ async function startServer() {
   // API routes
   app.use(express.json());
 
-  // Auth middleware
+  // Enhanced Auth middleware - supports both Bearer token and API Key
   const authMiddleware = (req: any, res: any, next: any) => {
-    const token = req.headers.authorization?.replace("Bearer ", "");
-    if (!token) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    const authHeader = req.headers.authorization;
     
-    const session = validateSession(token);
-    if (!session) {
-      return res.status(401).json({ error: "Session expired" });
+    if (!authHeader) {
+      return res.status(401).json({ error: "Authorization header required" });
     }
-    
-    req.user = session;
-    next();
+
+    // Check for API Key (starts with sk_)
+    if (authHeader.startsWith("sk_")) {
+      const apiKey = authHeader;
+      const keyData = validateApiKey(apiKey);
+      if (!keyData) {
+        return res.status(401).json({ error: "Invalid or expired API key" });
+      }
+      req.user = { type: "api", ...keyData };
+      return next();
+    }
+
+    // Check for Bearer token
+    if (authHeader.startsWith("Bearer ")) {
+      const token = authHeader.replace("Bearer ", "");
+      const session = validateSession(token);
+      if (!session) {
+        return res.status(401).json({ error: "Session expired or invalid" });
+      }
+      req.user = { type: "session", ...session };
+      return next();
+    }
+
+    return res.status(401).json({ error: "Invalid authorization format" });
   };
+
+  // API Key management endpoints (admin only)
+  app.post("/api/keys", authMiddleware, async (req, res) => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { name, userId } = req.body;
+    const apiKey = generateApiKey();
+    const keyHash = hashApiKey(apiKey);
+
+    apiKeys.set(keyHash, {
+      name: name || "API Key",
+      userId: userId || req.user.userId,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + API_KEY_EXPIRY
+    });
+
+    res.json({
+      success: true,
+      apiKey,
+      expiresIn: API_KEY_EXPIRY,
+      message: "Save this API key - it won't be shown again"
+    });
+  });
+
+  app.get("/api/keys", authMiddleware, async (req, res) => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const keys = Array.from(apiKeys.entries()).map(([hash, data]) => ({
+      name: data.name,
+      userId: data.userId,
+      createdAt: data.createdAt,
+      expiresAt: data.expiresAt,
+      isExpired: Date.now() > data.expiresAt
+    }));
+
+    res.json(keys);
+  });
+
+  app.delete("/api/keys/:keyHash", authMiddleware, async (req, res) => {
+    if (req.user.role !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const { keyHash } = req.params;
+    if (apiKeys.has(keyHash)) {
+      apiKeys.delete(keyHash);
+      res.json({ success: true, message: "API key revoked" });
+    } else {
+      res.status(404).json({ error: "API key not found" });
+    }
+  });
 
   // Protected routes
   app.get("/api/users", authMiddleware, async (req, res) => {
