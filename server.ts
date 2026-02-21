@@ -169,6 +169,92 @@ async function startServer() {
     res.json({ success: true, message: "Logged out" });
   });
 
+  // Mobile Login API - for Flutter/React Native apps
+  const mobileRateLimit = new Map<string, { count: number; firstAttempt: number }>();
+  
+  const isMobileRateLimited = (identifier: string): boolean => {
+    const now = Date.now();
+    const attempts = mobileRateLimit.get(identifier);
+    
+    if (!attempts || now - attempts.firstAttempt > RATE_LIMIT_WINDOW) {
+      mobileRateLimit.set(identifier, { count: 1, firstAttempt: now });
+      return false;
+    }
+    
+    if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+      return true;
+    }
+    
+    attempts.count++;
+    return false;
+  };
+
+  const resetMobileRateLimit = (identifier: string) => {
+    mobileRateLimit.delete(identifier);
+  };
+
+  app.post("/api/mobile/login", async (req, res) => {
+    const { identifier, password } = req.body;
+    
+    if (!identifier || !password) {
+      return res.status(400).json({ error: "Identifier and password are required" });
+    }
+
+    if (isMobileRateLimited(identifier)) {
+      return res.status(429).json({ 
+        error: "Too many login attempts. Please try again in 15 minutes." 
+      });
+    }
+
+    try {
+      const [rows]: any = await pool.query(
+        "SELECT * FROM users WHERE (username = ? OR phone_number = ?) AND is_active = 1",
+        [identifier, identifier]
+      );
+      
+      if (rows.length === 0) {
+        resetMobileRateLimit(identifier);
+        return res.status(401).json({ error: "Invalid credentials or account inactive" });
+      }
+      
+      const user = rows[0];
+      const isValidPassword = await bcrypt.compare(password, user.password);
+      
+      if (!isValidPassword) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      resetMobileRateLimit(identifier);
+      await pool.query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
+      
+      const token = generateToken();
+      sessions.set(token, {
+        userId: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        createdAt: Date.now()
+      });
+      
+      res.json({ 
+        success: true, 
+        message: "Login successful",
+        token,
+        expiresIn: SESSION_EXPIRY,
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          email: user.email,
+          full_name: user.full_name,
+          role: user.role,
+          phone_number: user.phone_number
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/auth/verify", (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
     if (!token) {
