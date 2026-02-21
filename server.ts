@@ -8,7 +8,7 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10);
 
   // Database connection pool
   const pool = mysql.createPool({
@@ -227,6 +227,10 @@ async function startServer() {
     }
   } else {
     app.use(express.static("dist"));
+
+    app.get("*", (req, res) => {
+      res.sendFile("dist/index.html");
+    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
